@@ -1,9 +1,9 @@
 import { useState } from "react";
 import type { Rule, RuleStatus } from "../types";
-import { basename, fmtDuration, fmtMinutes } from "../format";
+import { basename, fmtCountdown, fmtDuration, fmtMinutes } from "../format";
 import Ring from "./Ring";
 import AppAvatar from "./AppAvatar";
-import { IconEdit, IconFile, IconFolder, IconLock, IconPause, IconPlay, IconTrash } from "../icons";
+import { IconClock, IconEdit, IconFile, IconFolder, IconLock, IconPause, IconPlay, IconTrash } from "../icons";
 
 interface Props {
   status: RuleStatus;
@@ -11,29 +11,35 @@ interface Props {
   onEdit: (r: Rule) => void;
   onToggle: (r: Rule) => void;
   onDelete: (r: Rule) => void;
+  onExtra: (r: Rule) => void;
 }
 
-export default function RuleCard({ status, resetAt, onEdit, onToggle, onDelete }: Props) {
-  const { rule, usedSec, limitSec, running, locked, reached } = status;
+export default function RuleCard({ status, resetAt, onEdit, onToggle, onDelete, onExtra }: Props) {
+  const { rule, usedSec, limitSec, running, locked, reached, extra } = status;
+  const inExtra = extra.activeLeft != null;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const remaining = Math.max(0, limitSec - usedSec);
   const progress = limitSec > 0 ? usedSec / limitSec : 1;
 
   const tone = !rule.enabled
     ? "off"
-    : reached
+    : inExtra
+      ? "warn"
+      : reached
       ? "danger"
       : remaining <= Math.min(600, limitSec * 0.2)
         ? "warn"
         : "ok";
   const pill = !rule.enabled
     ? { cls: "off", text: "Paused" }
-    : reached
+    : inExtra
+      ? { cls: "extra", text: running ? "Extra time · playing" : "Extra time" }
+      : reached
       ? { cls: "danger", text: limitSec === 0 ? "Blocked" : "Limit reached" }
       : running
         ? { cls: "live", text: "Playing now" }
         : { cls: "idle", text: "Not running" };
-  const isLive = running && rule.enabled && !reached;
+  const isLive = running && rule.enabled && (!reached || inExtra);
 
   return (
     <article className={`card rule-card ${isLive ? "is-running" : ""} ${!rule.enabled ? "is-off" : ""}`}>
@@ -49,8 +55,16 @@ export default function RuleCard({ status, resetAt, onEdit, onToggle, onDelete }
       </header>
 
       <div className="rule-body">
-        <Ring progress={rule.enabled ? progress : 0} tone={tone}>
-          {locked ? (
+        <Ring
+          progress={!rule.enabled ? 0 : inExtra ? (extra.activeLeft ?? 0) / ((extraLength(extra.used) || 1) * 60) : progress}
+          tone={tone}
+        >
+          {inExtra ? (
+            <>
+              <strong>{fmtCountdown(extra.activeLeft ?? 0)}</strong>
+              <small>extra time</small>
+            </>
+          ) : locked ? (
             <>
               <IconLock size={22} />
               <small>until {resetAt}</small>
@@ -93,6 +107,8 @@ export default function RuleCard({ status, resetAt, onEdit, onToggle, onDelete }
         )}
       </div>
 
+      {reached && rule.enabled && rule.allowExtra && <ExtraRow extra={extra} onStart={() => onExtra(rule)} />}
+
       <footer className="rule-actions">
         {locked ? (
           <p className="locked-note">
@@ -124,5 +140,56 @@ export default function RuleCard({ status, resetAt, onEdit, onToggle, onDelete }
         )}
       </footer>
     </article>
+  );
+}
+
+const EXTRA_STEPS = [5, 2, 1];
+const extraLength = (used: number) => EXTRA_STEPS[Math.max(0, Math.min(used, EXTRA_STEPS.length) - 1)];
+
+/** Extra time after the limit: available, running, cooling down or used up. */
+function ExtraRow({ extra, onStart }: { extra: RuleStatus["extra"]; onStart: () => void }) {
+  const steps = (
+    <span className="extra-steps" title="Extra sessions used today">
+      {EXTRA_STEPS.map((m, i) => (
+        <i key={m} className={i < extra.used ? "used" : ""}>{m}m</i>
+      ))}
+    </span>
+  );
+  if (extra.activeLeft != null) {
+    return (
+      <div className="extra-row active">
+        <IconClock size={15} />
+        <span>Extra time running — <b>{fmtCountdown(extra.activeLeft)}</b> left</span>
+        {steps}
+      </div>
+    );
+  }
+  if (extra.nextMinutes == null) {
+    return (
+      <div className="extra-row done">
+        <IconLock size={15} />
+        <span>No extra time left today</span>
+        {steps}
+      </div>
+    );
+  }
+  if (extra.cooldownLeft != null) {
+    return (
+      <div className="extra-row">
+        <IconClock size={15} />
+        <span>
+          {extra.nextMinutes} more min available in <b>{fmtCountdown(extra.cooldownLeft)}</b>
+        </span>
+        {steps}
+      </div>
+    );
+  }
+  return (
+    <div className="extra-row ready">
+      <span>Need to finish something?</span>
+      <button className="btn primary sm" onClick={onStart}>
+        Use {extra.nextMinutes} more minute{extra.nextMinutes === 1 ? "" : "s"}
+      </button>
+    </div>
   );
 }
