@@ -4,7 +4,7 @@ use crate::monitor;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use sysinfo::System;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
 type Res<T> = Result<T, String>;
@@ -100,8 +100,11 @@ pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings)
         if protected_changed && g.any_locked() {
             return Err("The day start and quit protection can't be changed while a limit is locked.".into());
         }
+        // The sound file is only changed through set_sound.
         g.data.settings = Settings {
             reset_hour: settings.reset_hour.min(12),
+            sound_file: old.sound_file,
+            sound_name: old.sound_name,
             ..settings
         };
     }
@@ -181,7 +184,71 @@ pub async fn test_alert(app: AppHandle) {
         Level::Warning,
         "Kenshi — 5 minutes left".into(),
         "This is a test. Real warnings look exactly like this.".into(),
+        None,
     );
+}
+
+/// Starts the next extra-time session (5, then 2, then 1 minute) for a rule whose limit is reached.
+#[tauri::command]
+pub async fn start_extra(app: AppHandle, id: String) -> Res<Snapshot> {
+    let state = app.state::<AppState>();
+    let (minutes, name) = {
+        let mut g = state.0.lock().unwrap();
+        let minutes = g.start_extra(&id)?;
+        let name = g.data.rules.iter().find(|r| r.id == id).map(|r| r.name.clone()).unwrap_or_default();
+        (minutes, name)
+    };
+    alert(
+        &app,
+        Level::Info,
+        format!("{minutes} more minute{} for {name}", if minutes == 1 { "" } else { "s" }),
+        "Extra time has started. You can open it again now.".into(),
+        None,
+    );
+    Ok(publish(&app, &state))
+}
+
+/// Sets a custom warning sound (copied into the app data folder), or goes back to the beep with `None`.
+#[tauri::command]
+pub fn set_sound(app: AppHandle, state: State<AppState>, path: Option<String>) -> Res<Snapshot> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let old = state.0.lock().unwrap().data.settings.sound_file.clone();
+
+    let (file, name) = match path {
+        None => (None, None),
+        Some(path) => {
+            let src = std::path::PathBuf::from(&path);
+            let ext = src
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .filter(|e| ["wav", "mp3", "ogg", "flac"].contains(&e.as_str()))
+                .ok_or("Pick a .wav, .mp3, .ogg or .flac file.")?;
+            let name = src.file_name().map(|n| n.to_string_lossy().to_string());
+            let dest = dir.join(format!("custom_sound_{}.{ext}", chrono::Utc::now().timestamp()));
+            std::fs::copy(&src, &dest).map_err(|e| format!("Couldn't copy the sound: {e}"))?;
+            if !crate::alert::can_play(&dest) {
+                let _ = std::fs::remove_file(&dest);
+                return Err("This file can't be played. Try another sound.".into());
+            }
+            (Some(dest.to_string_lossy().to_string()), name)
+        }
+    };
+
+    if let Some(old) = old {
+        let _ = std::fs::remove_file(old);
+    }
+    {
+        let mut g = state.0.lock().unwrap();
+        g.data.settings.sound_file = file;
+        g.data.settings.sound_name = name;
+    }
+    Ok(publish(&app, &state))
+}
+
+#[tauri::command]
+pub fn test_sound(state: State<AppState>) {
+    let file = state.0.lock().unwrap().data.settings.sound_file.clone();
+    crate::alert::play_sound(file);
 }
 
 #[tauri::command]

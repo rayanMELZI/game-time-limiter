@@ -24,7 +24,7 @@ pub fn try_quit(app: &AppHandle) -> Result<(), String> {
     let can_quit = app.state::<AppState>().0.lock().unwrap().snapshot().can_quit;
     if !can_quit {
         let msg = "Quit protection is on while a limited app is running or locked.".to_string();
-        alert(app, Level::Info, "Game Time Limiter keeps running".into(), msg.clone());
+        alert(app, Level::Info, "Game Time Limiter keeps running".into(), msg.clone(), None);
         return Err(msg);
     }
     app.state::<AppState>().0.lock().unwrap().save();
@@ -114,6 +114,9 @@ pub fn run() {
             commands::get_autostart,
             commands::set_autostart,
             commands::quit_app,
+            commands::start_extra,
+            commands::set_sound,
+            commands::test_sound,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
