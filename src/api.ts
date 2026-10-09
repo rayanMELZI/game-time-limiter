@@ -14,6 +14,9 @@ export const api = {
   getAutostart: () => invoke<boolean>("get_autostart"),
   setAutostart: (enabled: boolean) => invoke<boolean>("set_autostart", { enabled }),
   quit: () => invoke<void>("quit_app"),
+  startExtra: (id: string) => invoke<Snapshot>("start_extra", { id }),
+  setSound: (path: string | null) => invoke<Snapshot>("set_sound", { path }),
+  testSound: () => invoke<void>("test_sound"),
 };
 
 export function errorText(e: unknown): string {
