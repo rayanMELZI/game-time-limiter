@@ -14,6 +14,17 @@ export interface Rule {
   warningsMin: number[];
   lockWhenReached: boolean;
   enabled: boolean;
+  allowExtra: boolean;
+}
+
+export interface ExtraInfo {
+  /** Seconds left in the running extra session. */
+  activeLeft: number | null;
+  /** Seconds until the next extra session can start. */
+  cooldownLeft: number | null;
+  /** Length of the next extra session, if any is left. */
+  nextMinutes: number | null;
+  used: number;
 }
 
 export interface RuleStatus {
@@ -24,6 +35,7 @@ export interface RuleStatus {
   processes: string[];
   reached: boolean;
   locked: boolean;
+  extra: ExtraInfo;
 }
 
 export interface Settings {
@@ -32,6 +44,8 @@ export interface Settings {
   overlay: boolean;
   notifications: boolean;
   guardQuit: boolean;
+  soundFile: string | null;
+  soundName: string | null;
 }
 
 export interface Snapshot {
@@ -58,4 +72,5 @@ export interface Toast {
   level: "info" | "warning" | "danger";
   title: string;
   body: string;
+  action: { label: string; ruleId: string } | null;
 }
