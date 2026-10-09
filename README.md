@@ -18,6 +18,8 @@ Get the latest `_x64-setup.exe` installer from the [Releases](../../releases/lat
 - **Counts real play time.** Time only counts while the app is running. Several apps can be limited at the same time, each with its own budget.
 - **Warnings before closing.** Shows an always-on-top banner, plays a beep and sends a Windows notification at the warning points you choose (default: 10, 5 and 1 minutes left).
 - **Closes it and keeps it closed.** When the limit is reached the app is killed, and it's killed again every time it's relaunched until the next day.
+- **Extra time after the limit (per app).** After time's up you can come back for 5, then 2, then 1 more minute, with a 5-minute cooldown between each, to finish what you were doing. Then it's locked for the day.
+- **Your own warning sound.** Pick any audio file in Settings (the first 10 seconds are played), or keep the built-in beep.
 - **Strict mode (per app).** Once the limit is reached the rule can't be edited, paused or removed until the next day. Turn it off for apps where you want to be able to extend your time.
 - **New day at 04:00 by default** (configurable), so playing past midnight doesn't reset your limit.
 - Weekend limits, a 7/14/30-day history, a 0-minute limit to block an app completely.
