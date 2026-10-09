@@ -10,6 +10,12 @@ export function fmtDuration(sec: number): string {
   return `${s}s`;
 }
 
+/** "4:05" countdown */
+export function fmtCountdown(sec: number): string {
+  const s = Math.max(0, Math.ceil(sec));
+  return `${Math.floor(s / 60)}:${pad(s % 60)}`;
+}
+
 /** Compact form for limits: "2h", "1h 30m", "45m" */
 export function fmtMinutes(min: number): string {
   const h = Math.floor(min / 60);
