@@ -1,7 +1,9 @@
 import type { Rule, Snapshot } from "../types";
 import { fmtClock, fmtDuration } from "../format";
 import RuleCard from "./RuleCard";
-import { IconClock, IconGamepad, IconLock, IconPlus } from "../icons";
+import { IconClock, IconGamepad, IconLock, IconPlus, IconRefresh } from "../icons";
+import { useUpdate } from "../useUpdate";
+import { api } from "../api";
 
 interface Props {
   snap: Snapshot;
@@ -14,6 +16,7 @@ interface Props {
 
 export default function Dashboard({ snap, onAdd, onEdit, onToggle, onDelete, onExtra }: Props) {
   const resetAt = fmtClock(snap.nextReset);
+  const upd = useUpdate();
   const total = snap.rules.reduce((s, r) => s + r.usedSec, 0);
   const playing = snap.rules.filter((r) => r.running && r.rule.enabled && (!r.reached || r.extra.activeLeft != null));
   const reached = snap.rules.filter((r) => r.reached).length;
@@ -34,6 +37,25 @@ export default function Dashboard({ snap, onAdd, onEdit, onToggle, onDelete, onE
           <IconPlus size={18} /> Limit an app
         </button>
       </header>
+
+      {upd?.available && (
+        <div className="update-banner">
+          <IconRefresh size={18} />
+          <div>
+            <strong>Version {upd.available} is available</strong>
+            <span>
+              {upd.installing
+                ? "Installing — the app will restart by itself."
+                : snap.settings.autoUpdate
+                  ? "It installs by itself once no limited app is running."
+                  : "Install it whenever you're ready."}
+            </span>
+          </div>
+          <button className="btn primary sm" disabled={upd.installing} onClick={() => api.installUpdate().catch(() => {})}>
+            {upd.installing ? "Installing…" : "Install now"}
+          </button>
+        </div>
+      )}
 
       <section className="stats">
         <div className="stat">
