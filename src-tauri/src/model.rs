@@ -9,6 +9,9 @@ use std::time::Instant;
 const HISTORY_DAYS: i64 = 60;
 /// Wall-clock jumps larger than this (in seconds) while the app runs are ignored.
 const CLOCK_TOLERANCE: i64 = 120;
+/// Extra time after the limit: 5, then 2, then 1 minute, each followed by a cooldown.
+pub const EXTRA_STEPS_MIN: [u32; 3] = [5, 2, 1];
+pub const EXTRA_COOLDOWN_SEC: i64 = 5 * 60;
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -58,6 +61,9 @@ pub struct Rule {
     pub lock_when_reached: bool,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// After the limit, allow short extra sessions (see EXTRA_STEPS_MIN).
+    #[serde(default = "yes")]
+    pub allow_extra: bool,
 }
 
 impl Rule {
@@ -89,6 +95,12 @@ pub struct Settings {
     pub notifications: bool,
     /// Refuse to quit while a limited app is running or a rule is locked.
     pub guard_quit: bool,
+    /// Custom warning sound copied into the app data folder (None = built-in beep).
+    #[serde(default)]
+    pub sound_file: Option<String>,
+    /// Original file name of the custom sound, for display.
+    #[serde(default)]
+    pub sound_name: Option<String>,
 }
 
 impl Default for Settings {
@@ -99,6 +111,8 @@ impl Default for Settings {
             overlay: true,
             notifications: true,
             guard_quit: true,
+            sound_file: None,
+            sound_name: None,
         }
     }
 }
@@ -112,6 +126,30 @@ pub struct Data {
     pub usage: BTreeMap<String, HashMap<String, f64>>,
     /// Latest trusted timestamp ever seen; time never goes backwards past it.
     pub last_seen: i64,
+    /// rule id -> extra time used today
+    pub extra: HashMap<String, ExtraState>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtraState {
+    pub day: String,
+    /// Number of extra sessions started today.
+    pub stage: u32,
+    pub active_until: Option<i64>,
+    pub cooldown_until: Option<i64>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtraInfo {
+    /// Seconds left in the running extra session.
+    pub active_left: Option<f64>,
+    /// Seconds until the next extra session can start.
+    pub cooldown_left: Option<f64>,
+    /// Length of the next extra session, if any is left.
+    pub next_minutes: Option<u32>,
+    pub used: u32,
 }
 
 /// Wall clock that ignores large jumps made while the app is running
@@ -169,6 +207,7 @@ pub struct RuleStatus {
     pub processes: Vec<String>,
     pub reached: bool,
     pub locked: bool,
+    pub extra: ExtraInfo,
 }
 
 #[derive(Clone, Serialize)]
@@ -182,10 +221,18 @@ pub struct Snapshot {
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToastAction {
+    pub label: String,
+    pub rule_id: String,
+}
+
+#[derive(Clone, Serialize)]
 pub struct Toast {
     pub level: String,
     pub title: String,
     pub body: String,
+    pub action: Option<ToastAction>,
 }
 
 pub struct Inner {
@@ -197,6 +244,8 @@ pub struct Inner {
     pub fired: HashMap<String, (String, Vec<u32>)>,
     /// rule id -> last time a "this app is locked" notice was shown
     pub blocked_notice: HashMap<String, Instant>,
+    /// (rule id, extra stage) whose "1 minute left" warning was shown
+    pub extra_warned: std::collections::HashSet<(String, u32)>,
     pub toast: Option<Toast>,
     pub dirty: bool,
     path: PathBuf,
@@ -218,6 +267,7 @@ impl Inner {
             running: HashMap::new(),
             fired: HashMap::new(),
             blocked_notice: HashMap::new(),
+            extra_warned: Default::default(),
             toast: None,
             dirty: first_run,
             path,
@@ -249,11 +299,88 @@ impl Inner {
     }
 
     pub fn today(&mut self) -> DayInfo {
-        let now = self.now();
-        day_info(now, self.data.settings.reset_hour)
+        self.today_now().0
     }
 
-    pub fn status_of(&self, rule: &Rule, day: &DayInfo) -> RuleStatus {
+    /// Today's day info plus the trusted current timestamp.
+    pub fn today_now(&mut self) -> (DayInfo, i64) {
+        let now = self.now();
+        (day_info(now, self.data.settings.reset_hour), now.timestamp())
+    }
+
+    /// Today's extra-time state for a rule. Ends sessions whose time is up and
+    /// returns `Some(last)` when one just ended (`last`: no extra time left after it).
+    pub fn extra_tick(&mut self, rule_id: &str, day: &str, now: i64) -> (ExtraState, Option<bool>) {
+        let e = self.data.extra.entry(rule_id.to_string()).or_default();
+        let mut changed = false;
+        if e.day != day {
+            *e = ExtraState { day: day.to_string(), ..Default::default() };
+            changed = true;
+        }
+        let mut ended = None;
+        if let Some(until) = e.active_until {
+            if now >= until {
+                e.active_until = None;
+                let last = e.stage as usize >= EXTRA_STEPS_MIN.len();
+                if !last {
+                    e.cooldown_until = Some(until + EXTRA_COOLDOWN_SEC);
+                }
+                ended = Some(last);
+                changed = true;
+            }
+        }
+        if e.cooldown_until.is_some_and(|c| now >= c) {
+            e.cooldown_until = None;
+            changed = true;
+        }
+        let state = e.clone();
+        if changed {
+            self.dirty = true;
+        }
+        (state, ended)
+    }
+
+    /// Starts the next extra-time session for a rule whose limit is reached. Returns its length in minutes.
+    pub fn start_extra(&mut self, rule_id: &str) -> Result<u32, String> {
+        let (day, now) = self.today_now();
+        self.start_extra_at(rule_id, &day, now)
+    }
+
+    fn start_extra_at(&mut self, rule_id: &str, day: &DayInfo, now: i64) -> Result<u32, String> {
+        let rule = self
+            .data
+            .rules
+            .iter()
+            .find(|r| r.id == rule_id)
+            .cloned()
+            .ok_or("This limit no longer exists.")?;
+        if !rule.allow_extra {
+            return Err(format!("Extra time is turned off for {}.", rule.name));
+        }
+        if !self.status_of(&rule, day, now).reached {
+            return Err(format!("{} still has time left today.", rule.name));
+        }
+        let (state, _) = self.extra_tick(rule_id, &day.key, now);
+        if state.active_until.is_some() {
+            return Err("Extra time is already running.".into());
+        }
+        if let Some(c) = state.cooldown_until {
+            let left = c - now;
+            return Err(format!("Next extra time in {}:{:02}.", left / 60, left % 60));
+        }
+        let minutes = *EXTRA_STEPS_MIN.get(state.stage as usize).ok_or(format!(
+            "No extra time left today. {} unlocks at {}.",
+            rule.name,
+            day.next_reset.format("%H:%M")
+        ))?;
+        let e = self.data.extra.get_mut(rule_id).expect("extra state");
+        e.stage += 1;
+        e.active_until = Some(now + minutes as i64 * 60);
+        self.dirty = true;
+        Ok(minutes)
+    }
+
+    pub fn status_of(&self, rule: &Rule, day: &DayInfo, now: i64) -> RuleStatus {
         let used = self
             .data
             .usage
@@ -264,7 +391,15 @@ impl Inner {
         let limit = rule.limit_sec(day.weekday);
         let reached = rule.enabled && used >= limit;
         let processes = self.running.get(&rule.id).cloned().unwrap_or_default();
+        let state = self
+            .data
+            .extra
+            .get(&rule.id)
+            .filter(|e| e.day == day.key)
+            .cloned()
+            .unwrap_or_default();
         RuleStatus {
+            extra: extra_info(&state, now, rule.allow_extra),
             rule: rule.clone(),
             used_sec: used,
             limit_sec: limit,
@@ -276,22 +411,22 @@ impl Inner {
     }
 
     pub fn is_locked(&mut self, rule_id: &str) -> bool {
-        let day = self.today();
+        let (day, now) = self.today_now();
         self.data
             .rules
             .iter()
             .find(|r| r.id == rule_id)
-            .is_some_and(|r| self.status_of(r, &day).locked)
+            .is_some_and(|r| self.status_of(r, &day, now).locked)
     }
 
     pub fn any_locked(&mut self) -> bool {
-        let day = self.today();
-        self.data.rules.iter().any(|r| self.status_of(r, &day).locked)
+        let (day, now) = self.today_now();
+        self.data.rules.iter().any(|r| self.status_of(r, &day, now).locked)
     }
 
     pub fn snapshot(&mut self) -> Snapshot {
-        let day = self.today();
-        let rules: Vec<RuleStatus> = self.data.rules.iter().map(|r| self.status_of(r, &day)).collect();
+        let (day, now) = self.today_now();
+        let rules: Vec<RuleStatus> = self.data.rules.iter().map(|r| self.status_of(r, &day, now)).collect();
         let busy = rules.iter().any(|r| r.locked || (r.running && r.rule.enabled));
         Snapshot {
             day: day.key.clone(),
@@ -306,3 +441,13 @@ impl Inner {
         self.today().next_reset.format("%H:%M").to_string()
     }
 }
+
+pub fn extra_info(state: &ExtraState, now: i64, allowed: bool) -> ExtraInfo {
+    ExtraInfo {
+        active_left: state.active_until.map(|u| (u - now).max(0) as f64),
+        cooldown_left: state.cooldown_until.map(|c| (c - now).max(0) as f64),
+        next_minutes: if allowed { EXTRA_STEPS_MIN.get(state.stage as usize).copied() } else { None },
+        used: state.stage,
+    }
+}
+
