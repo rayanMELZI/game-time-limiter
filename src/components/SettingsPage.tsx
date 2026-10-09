@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { Run } from "../App";
 import type { Settings, Snapshot } from "../types";
-import { IconBell, IconClock, IconShield } from "../icons";
+import { open } from "@tauri-apps/plugin-dialog";
+import { IconBell, IconClock, IconPlay, IconShield } from "../icons";
 
 interface Props {
   snap: Snapshot;
@@ -33,6 +34,12 @@ export default function SettingsPage({ snap, run }: Props) {
   }, []);
 
   const update = (patch: Partial<Settings>) => run(() => api.saveSettings({ ...s, ...patch }), "Settings saved");
+
+  const chooseSound = async () => {
+    const path = await open({ multiple: false, filters: [{ name: "Sounds", extensions: ["wav", "mp3", "ogg", "flac"] }] });
+    if (typeof path !== "string") return;
+    if (await run(() => api.setSound(path), "Warning sound changed")) api.testSound();
+  };
 
   return (
     <div className="page narrow">
@@ -65,7 +72,26 @@ export default function SettingsPage({ snap, run }: Props) {
         <Toggle checked={s.overlay} onChange={(v) => update({ overlay: v })} title="On-screen banner"
           desc="An always-on-top banner at the top of the screen. Visible over borderless/windowed games." />
         <Toggle checked={s.sound} onChange={(v) => update({ sound: v })} title="Warning sound"
-          desc="Plays a beep with every warning — you'll hear it even in exclusive fullscreen." />
+          desc="Plays a sound with every warning — you'll hear it even in exclusive fullscreen." />
+        <div className="setting">
+          <div>
+            <strong>Sound</strong>
+            <p>{s.soundName ? <span className="sound-name">{s.soundName}</span> : "Default beep"} · WAV, MP3, OGG or FLAC, first 10 seconds.</p>
+          </div>
+          <div className="setting-actions">
+            <button className="btn ghost sm icon-only" title="Play" onClick={() => api.testSound()}>
+              <IconPlay size={14} />
+            </button>
+            {s.soundName && (
+              <button className="btn ghost sm" onClick={() => run(() => api.setSound(null), "Back to the default beep")}>
+                Reset
+              </button>
+            )}
+            <button className="btn ghost sm" onClick={chooseSound}>
+              Choose…
+            </button>
+          </div>
+        </div>
         <Toggle checked={s.notifications} onChange={(v) => update({ notifications: v })} title="Windows notifications"
           desc="Also sends a regular notification to the Windows action center." />
         <div className="setting">
