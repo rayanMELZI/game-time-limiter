@@ -451,3 +451,96 @@ pub fn extra_info(state: &ExtraState, now: i64, allowed: bool) -> ExtraInfo {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup() -> (Inner, DayInfo, i64) {
+        let path = std::env::temp_dir().join(format!("gtl-test-{}.json", std::process::id()));
+        let (mut inner, _) = Inner::load(path);
+        inner.data.rules.push(Rule {
+            id: "r1".into(),
+            name: "Kenshi".into(),
+            targets: vec![],
+            daily_limit_min: 60,
+            weekend_limit_min: None,
+            warnings_min: vec![],
+            lock_when_reached: true,
+            enabled: true,
+            allow_extra: true,
+        });
+        let t = Local.with_ymd_and_hms(2026, 10, 9, 20, 0, 0).unwrap();
+        let day = day_info(t, 4);
+        (inner, day, t.timestamp())
+    }
+
+    fn reach_limit(inner: &mut Inner, day: &DayInfo) {
+        inner.data.usage.entry(day.key.clone()).or_default().insert("r1".into(), 3600.0);
+    }
+
+    #[test]
+    fn extra_needs_the_limit_reached() {
+        let (mut inner, day, now) = setup();
+        assert!(inner.start_extra_at("r1", &day, now).is_err());
+    }
+
+    #[test]
+    fn extra_ladder_5_2_1_with_cooldowns() {
+        let (mut inner, day, mut now) = setup();
+        reach_limit(&mut inner, &day);
+
+        for (i, minutes) in EXTRA_STEPS_MIN.iter().enumerate() {
+            assert_eq!(inner.start_extra_at("r1", &day, now), Ok(*minutes), "session {i}");
+            // Can't start another while one runs.
+            assert!(inner.start_extra_at("r1", &day, now + 10).is_err());
+            let (state, ended) = inner.extra_tick("r1", &day.key, now + *minutes as i64 * 60 - 1);
+            assert!(state.active_until.is_some() && ended.is_none());
+
+            // Session ends exactly at its length.
+            now += *minutes as i64 * 60;
+            let (state, ended) = inner.extra_tick("r1", &day.key, now);
+            let last = i == EXTRA_STEPS_MIN.len() - 1;
+            assert_eq!(ended, Some(last));
+            assert!(state.active_until.is_none());
+
+            if last {
+                assert!(state.cooldown_until.is_none());
+                let info = extra_info(&state, now, true);
+                assert_eq!(info.next_minutes, None);
+                assert!(inner.start_extra_at("r1", &day, now + 3600).is_err());
+            } else {
+                // 5-minute cooldown before the next one.
+                assert_eq!(state.cooldown_until, Some(now + EXTRA_COOLDOWN_SEC));
+                assert!(inner.start_extra_at("r1", &day, now + EXTRA_COOLDOWN_SEC - 1).is_err());
+                now += EXTRA_COOLDOWN_SEC;
+            }
+        }
+    }
+
+    #[test]
+    fn extra_resets_on_a_new_day() {
+        let (mut inner, day, now) = setup();
+        reach_limit(&mut inner, &day);
+        inner.start_extra_at("r1", &day, now).unwrap();
+        let (state, _) = inner.extra_tick("r1", "2026-10-10", now + 86_400);
+        assert_eq!(state.stage, 0);
+        assert!(state.active_until.is_none());
+    }
+
+    #[test]
+    fn extra_can_be_turned_off() {
+        let (mut inner, day, now) = setup();
+        reach_limit(&mut inner, &day);
+        inner.data.rules[0].allow_extra = false;
+        assert!(inner.start_extra_at("r1", &day, now).is_err());
+    }
+
+    #[test]
+    fn old_data_files_still_load() {
+        let json = r#"{"rules":[{"id":"a","name":"X","targets":[],"dailyLimitMin":30}],
+            "settings":{"resetHour":4,"sound":true,"overlay":true,"notifications":true,"guardQuit":true},"usage":{},"lastSeen":0}"#;
+        let data: Data = serde_json::from_str(json).unwrap();
+        assert!(data.rules[0].allow_extra);
+        assert!(data.settings.sound_file.is_none());
+    }
+}
