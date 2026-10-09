@@ -23,11 +23,15 @@
         "theme": "Dark"
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,6 +39,22 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "windows": { "nsis": { "installMode": "currentUser" } }
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE2MjkxRkRDNEQ2ODc3MzQKUldRMGQyaE4zQjhwcGhObVFicHN5WEhwVnVMZ0t4ZU5XM3BTSmswRFZHcXkvaWduc0FJWUJSL3AK",
+      "endpoints": [
+        "https://github.com/rayanMELZI/game-time-limiter/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
