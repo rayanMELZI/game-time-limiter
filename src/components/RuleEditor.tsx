@@ -4,7 +4,7 @@ import { api } from "../api";
 import type { ProcInfo, Rule, Target } from "../types";
 import { basename, fmtMinutes, prettyName } from "../format";
 import AppAvatar from "./AppAvatar";
-import { IconCheck, IconFile, IconFolder, IconLock, IconRefresh, IconSearch, IconX } from "../icons";
+import { IconCheck, IconClock, IconFile, IconFolder, IconLock, IconRefresh, IconSearch, IconX } from "../icons";
 
 const LIMIT_PRESETS = [30, 60, 90, 120, 180, 240];
 const WARNING_OPTIONS = [30, 15, 10, 5, 2, 1];
@@ -43,6 +43,7 @@ export default function RuleEditor({ initial, onClose, onSave }: Props) {
   const [weekend, setWeekend] = useState<number | null>(initial?.weekendLimitMin ?? null);
   const [warnings, setWarnings] = useState<number[]>(initial?.warningsMin ?? [10, 5, 1]);
   const [strict, setStrict] = useState(initial?.lockWhenReached ?? true);
+  const [allowExtra, setAllowExtra] = useState(initial?.allowExtra ?? true);
 
   const [procs, setProcs] = useState<ProcInfo[] | null>(null);
   const [query, setQuery] = useState("");
@@ -101,6 +102,7 @@ export default function RuleEditor({ initial, onClose, onSave }: Props) {
       warningsMin: warnings.filter((w) => w < Math.max(limit, weekend ?? 0)),
       lockWhenReached: strict,
       enabled: initial?.enabled ?? true,
+      allowExtra,
     });
 
   const canSave = name.trim() && targets.length > 0;
@@ -219,6 +221,18 @@ export default function RuleEditor({ initial, onClose, onSave }: Props) {
                 ))}
               </div>
             </div>
+
+            <label className={`strict-box extra-box ${allowExtra ? "on" : ""}`}>
+              <input type="checkbox" checked={allowExtra} onChange={(e) => setAllowExtra(e.target.checked)} />
+              <span className="switch" />
+              <div>
+                <strong><IconClock size={14} /> Extra time after the limit</strong>
+                <p>
+                  After time's up, you can come back for 5, then 2, then 1 more minute — with a 5-minute break
+                  between each — to finish what you were doing.
+                </p>
+              </div>
+            </label>
 
             <label className={`strict-box ${strict ? "on" : ""}`}>
               <input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)} />
