@@ -1,5 +1,5 @@
 use crate::alert::{alert, Level};
-use crate::model::AppState;
+use crate::model::{AppState, ToastAction, EXTRA_STEPS_MIN};
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
@@ -17,6 +17,13 @@ struct Proc {
     path: Option<String>,
 }
 
+struct Pending {
+    level: Level,
+    title: String,
+    body: String,
+    action: Option<ToastAction>,
+}
+
 pub fn refresh(sys: &mut System) {
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
@@ -25,6 +32,17 @@ pub fn refresh(sys: &mut System) {
             .with_exe(UpdateKind::OnlyIfNotSet)
             .with_memory(),
     );
+}
+
+/// "Use 5 more minutes" button, when an extra session can start right now.
+fn extra_action(rule_id: &str, next: Option<u32>, cooling: bool) -> Option<ToastAction> {
+    match next {
+        Some(m) if !cooling => Some(ToastAction {
+            label: format!("Use {m} more minute{}", if m == 1 { "" } else { "s" }),
+            rule_id: rule_id.to_string(),
+        }),
+        _ => None,
+    }
 }
 
 pub fn spawn(app: AppHandle) {
@@ -52,12 +70,12 @@ pub fn spawn(app: AppHandle) {
                 .collect();
 
             let mut kills: Vec<Pid> = Vec::new();
-            let mut alerts: Vec<(Level, String, String)> = Vec::new();
+            let mut alerts: Vec<Pending> = Vec::new();
 
             let snapshot = {
                 let state = app.state::<AppState>();
                 let mut g = state.0.lock().unwrap();
-                let day = g.today();
+                let (day, now) = g.today_now();
                 let reset_label = day.next_reset.format("%H:%M").to_string();
                 g.running.clear();
 
@@ -69,6 +87,11 @@ pub fn spawn(app: AppHandle) {
                     let running = !matched.is_empty();
                     let limit = rule.limit_sec(day.weekday);
 
+                    let (extra, extra_ended) = g.extra_tick(&rule.id, &day.key, now);
+                    let in_extra = extra.active_until.is_some();
+                    let cooling = extra.cooldown_until.is_some();
+                    let next_extra = if rule.allow_extra { EXTRA_STEPS_MIN.get(extra.stage as usize).copied() } else { None };
+
                     let used = g
                         .data
                         .usage
@@ -79,15 +102,36 @@ pub fn spawn(app: AppHandle) {
                     let was_under = *used < limit;
                     if running && was_under {
                         *used = (*used + dt).min(limit);
+                    } else if running && in_extra {
+                        // Extra time still shows up in the history.
+                        *used += dt;
                     }
                     let used = *used;
-                    if running && was_under {
+                    if running && (was_under || in_extra) {
                         g.dirty = true;
                     }
 
                     if running {
                         let names: BTreeSet<String> = matched.iter().map(|p| p.name.clone()).collect();
                         g.running.insert(rule.id.clone(), names.into_iter().collect());
+                    }
+
+                    if let Some(last) = extra_ended {
+                        g.blocked_notice.insert(rule.id.clone(), Instant::now());
+                        alerts.push(Pending {
+                            level: Level::Danger,
+                            title: format!("Extra time is over — {}", rule.name),
+                            body: if last {
+                                format!("That was the last extra time. It unlocks at {reset_label}.")
+                            } else {
+                                format!(
+                                    "You can come back for {} more minute{} in 5 minutes.",
+                                    next_extra.unwrap_or(1),
+                                    if next_extra == Some(1) { "" } else { "s" }
+                                )
+                            },
+                            action: None,
+                        });
                     }
 
                     // Re-arm warnings when the limit went up, and reset them on a new day.
@@ -102,14 +146,35 @@ pub fn spawn(app: AppHandle) {
                         continue;
                     }
 
+                    if remaining <= 0.0 && in_extra {
+                        let left = extra.active_until.unwrap_or(now) - now;
+                        let key = (rule.id.clone(), extra.stage);
+                        let session_min = EXTRA_STEPS_MIN[(extra.stage as usize).saturating_sub(1).min(EXTRA_STEPS_MIN.len() - 1)];
+                        if left <= 60 && session_min > 1 && !g.extra_warned.contains(&key) {
+                            g.extra_warned.insert(key);
+                            alerts.push(Pending {
+                                level: Level::Warning,
+                                title: format!("{} — 1 minute of extra time left", rule.name),
+                                body: "Wrap up now. It will be closed when the extra time runs out.".into(),
+                                action: None,
+                            });
+                        }
+                        continue;
+                    }
+
                     if remaining <= 0.0 {
                         kills.extend(matched.iter().map(|p| p.pid));
+                        let action = extra_action(&rule.id, next_extra, cooling);
                         if was_under {
-                            alerts.push((
-                                Level::Danger,
-                                format!("Time's up — {}", rule.name),
-                                format!("Your daily limit is reached. It unlocks at {reset_label}."),
-                            ));
+                            alerts.push(Pending {
+                                level: Level::Danger,
+                                title: format!("Time's up — {}", rule.name),
+                                body: match next_extra {
+                                    Some(m) => format!("Your daily limit is reached. Need to finish something? You can come back for {m} more minutes."),
+                                    None => format!("Your daily limit is reached. It unlocks at {reset_label}."),
+                                },
+                                action,
+                            });
                         } else {
                             let due = g
                                 .blocked_notice
@@ -117,11 +182,20 @@ pub fn spawn(app: AppHandle) {
                                 .is_none_or(|t| t.elapsed() >= BLOCKED_NOTICE_EVERY);
                             if due {
                                 g.blocked_notice.insert(rule.id.clone(), Instant::now());
-                                alerts.push((
-                                    Level::Danger,
-                                    format!("{} is locked", rule.name),
-                                    format!("No more play time today. Come back after {reset_label}."),
-                                ));
+                                let body = match (next_extra, extra.cooldown_until) {
+                                    (Some(m), Some(c)) => {
+                                        let left = (c - now).max(0);
+                                        format!("Extra time ({m} min) is available in {}:{:02}.", left / 60, left % 60)
+                                    }
+                                    (Some(m), None) => format!("You can still use {m} more minutes of extra time."),
+                                    (None, _) => format!("No more play time today. Come back after {reset_label}."),
+                                };
+                                alerts.push(Pending {
+                                    level: Level::Danger,
+                                    title: format!("{} is locked", rule.name),
+                                    body,
+                                    action,
+                                });
                             }
                         }
                         continue;
@@ -137,11 +211,12 @@ pub fn spawn(app: AppHandle) {
                     due.sort_unstable();
                     if !due.is_empty() {
                         fired.1.extend(&due);
-                        alerts.push((
-                            Level::Warning,
-                            format!("{} — {} left", rule.name, fmt_remaining(remaining)),
-                            "Save your game now. It will be closed when the time runs out.".into(),
-                        ));
+                        alerts.push(Pending {
+                            level: Level::Warning,
+                            title: format!("{} — {} left", rule.name, fmt_remaining(remaining)),
+                            body: "Save your game now. It will be closed when the time runs out.".into(),
+                            action: None,
+                        });
                     }
                 }
 
@@ -155,8 +230,8 @@ pub fn spawn(app: AppHandle) {
             for pid in kills {
                 kill(&sys, pid);
             }
-            for (level, title, body) in alerts {
-                alert(&app, level, title, body);
+            for a in alerts {
+                alert(&app, a.level, a.title, a.body, a.action);
             }
             let _ = app.emit("snapshot", &snapshot);
         }
