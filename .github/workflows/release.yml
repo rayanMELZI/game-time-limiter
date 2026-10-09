@@ -1,0 +1,47 @@
+name: Release
+
+# Push a tag like v1.0.0 to build the Windows installer and publish a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Game Time Limiter ${{ github.ref_name }}
+          releaseBody: |
+            Download the **`_x64-setup.exe`** installer below and run it. No admin rights needed.
+
+            After installing, Game Time Limiter starts with Windows and runs in the system tray.
+            Click **Limit an app**, pick a game, set a daily limit and you're done.
+          releaseDraft: false
+          prerelease: false
