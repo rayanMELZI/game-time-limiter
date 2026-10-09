@@ -9,12 +9,13 @@ interface Props {
   onEdit: (r: Rule) => void;
   onToggle: (r: Rule) => void;
   onDelete: (r: Rule) => void;
+  onExtra: (r: Rule) => void;
 }
 
-export default function Dashboard({ snap, onAdd, onEdit, onToggle, onDelete }: Props) {
+export default function Dashboard({ snap, onAdd, onEdit, onToggle, onDelete, onExtra }: Props) {
   const resetAt = fmtClock(snap.nextReset);
   const total = snap.rules.reduce((s, r) => s + r.usedSec, 0);
-  const playing = snap.rules.filter((r) => r.running && r.rule.enabled && !r.reached);
+  const playing = snap.rules.filter((r) => r.running && r.rule.enabled && (!r.reached || r.extra.activeLeft != null));
   const reached = snap.rules.filter((r) => r.reached).length;
   const date = new Date(snap.day + "T12:00:00").toLocaleDateString([], {
     weekday: "long",
@@ -82,6 +83,7 @@ export default function Dashboard({ snap, onAdd, onEdit, onToggle, onDelete }: P
               onEdit={onEdit}
               onToggle={onToggle}
               onDelete={onDelete}
+              onExtra={onExtra}
             />
           ))}
         </section>

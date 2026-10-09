@@ -97,6 +97,7 @@ export default function App() {
               run(() => api.setRuleEnabled(r.id, !r.enabled), r.enabled ? `${r.name} paused` : `${r.name} resumed`)
             }
             onDelete={(r) => run(() => api.deleteRule(r.id), `${r.name} removed`)}
+            onExtra={(r) => run(() => api.startExtra(r.id), `Extra time started for ${r.name}`)}
           />
         )}
         {page === "history" && <History snap={snap} />}
