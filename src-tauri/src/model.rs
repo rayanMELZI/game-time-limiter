@@ -101,6 +101,9 @@ pub struct Settings {
     /// Original file name of the custom sound, for display.
     #[serde(default)]
     pub sound_name: Option<String>,
+    /// Download and install new versions automatically (when no limited app is running).
+    #[serde(default = "yes")]
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -113,6 +116,7 @@ impl Default for Settings {
             guard_quit: true,
             sound_file: None,
             sound_name: None,
+            auto_update: true,
         }
     }
 }
