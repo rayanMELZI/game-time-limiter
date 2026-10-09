@@ -3,7 +3,8 @@ import { api } from "../api";
 import type { Run } from "../App";
 import type { Settings, Snapshot } from "../types";
 import { open } from "@tauri-apps/plugin-dialog";
-import { IconBell, IconClock, IconPlay, IconShield } from "../icons";
+import { IconBell, IconClock, IconPlay, IconRefresh, IconShield } from "../icons";
+import { useUpdate } from "../useUpdate";
 
 interface Props {
   snap: Snapshot;
@@ -28,6 +29,7 @@ function Toggle({ checked, onChange, title, desc }: { checked: boolean; onChange
 export default function SettingsPage({ snap, run }: Props) {
   const s = snap.settings;
   const [autostart, setAutostart] = useState<boolean | null>(null);
+  const upd = useUpdate();
 
   useEffect(() => {
     api.getAutostart().then(setAutostart);
@@ -101,6 +103,46 @@ export default function SettingsPage({ snap, run }: Props) {
           </div>
           <button className="btn ghost" onClick={() => api.testAlert()}>Test warning</button>
         </div>
+      </section>
+
+      <section className="card settings-group">
+        <h3 className="card-title"><IconRefresh size={16} /> Updates</h3>
+        <div className="setting">
+          <div>
+            <strong>
+              Version {upd?.current ?? "…"}
+              {upd?.available && <span className="update-badge">{upd.available} available</span>}
+            </strong>
+            <p>
+              {upd?.installing
+                ? "Installing the update — the app will restart by itself."
+                : upd?.checking
+                  ? "Checking for updates…"
+                  : upd?.error
+                    ? upd.error
+                    : upd?.available
+                      ? s.autoUpdate
+                        ? "It will install by itself as soon as no limited app is running."
+                        : "A new version is ready to install."
+                      : upd?.checkedAt
+                        ? `Up to date · checked ${new Date(upd.checkedAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                        : "Checks GitHub for new versions every few hours."}
+            </p>
+          </div>
+          <div className="setting-actions">
+            {upd?.available ? (
+              <button className="btn primary sm" disabled={upd.installing} onClick={() => run(() => api.installUpdate())}>
+                Install now
+              </button>
+            ) : (
+              <button className="btn ghost sm" disabled={upd?.checking} onClick={() => run(() => api.checkUpdate().then(() => undefined))}>
+                Check now
+              </button>
+            )}
+          </div>
+        </div>
+        <Toggle checked={s.autoUpdate} onChange={(v) => update({ autoUpdate: v })} title="Install updates automatically"
+          desc="Downloads new versions and restarts the app by itself — never while a limited app is running." />
       </section>
 
       <section className="card settings-group">
