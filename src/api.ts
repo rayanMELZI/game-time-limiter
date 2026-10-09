@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { DayUsage, ProcInfo, Rule, Settings, Snapshot, Toast } from "./types";
+import type { DayUsage, ProcInfo, Rule, Settings, Snapshot, Toast, UpdateStatus } from "./types";
 
 export const api = {
   snapshot: () => invoke<Snapshot>("get_snapshot"),
@@ -17,6 +17,9 @@ export const api = {
   startExtra: (id: string) => invoke<Snapshot>("start_extra", { id }),
   setSound: (path: string | null) => invoke<Snapshot>("set_sound", { path }),
   testSound: () => invoke<void>("test_sound"),
+  updateStatus: () => invoke<UpdateStatus>("get_update_status"),
+  checkUpdate: () => invoke<UpdateStatus>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
 };
 
 export function errorText(e: unknown): string {

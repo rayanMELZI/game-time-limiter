@@ -46,6 +46,16 @@ export interface Settings {
   guardQuit: boolean;
   soundFile: string | null;
   soundName: string | null;
+  autoUpdate: boolean;
+}
+
+export interface UpdateStatus {
+  current: string;
+  available: string | null;
+  checking: boolean;
+  installing: boolean;
+  error: string | null;
+  checkedAt: number | null;
 }
 
 export interface Snapshot {
