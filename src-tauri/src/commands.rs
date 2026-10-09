@@ -268,3 +268,23 @@ pub fn set_autostart(app: AppHandle, enabled: bool) -> Res<bool> {
 pub async fn quit_app(app: AppHandle) -> Res<()> {
     crate::try_quit(&app)
 }
+
+#[tauri::command]
+pub fn get_update_status(state: State<crate::updater::UpdateState>) -> crate::updater::UpdateStatus {
+    state.0.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Res<crate::updater::UpdateStatus> {
+    crate::updater::check(&app).await?;
+    Ok(app.state::<crate::updater::UpdateState>().0.lock().unwrap().clone())
+}
+
+/// Installs the latest version now, even if a limited app is running (the user asked for it).
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Res<()> {
+    match crate::updater::check(&app).await? {
+        Some(update) => crate::updater::install(&app, update).await,
+        None => Err("You already have the latest version.".into()),
+    }
+}

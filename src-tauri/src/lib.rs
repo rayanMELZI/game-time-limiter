@@ -2,6 +2,7 @@ mod alert;
 mod commands;
 mod model;
 mod monitor;
+mod updater;
 
 use alert::{alert, Level};
 use model::{AppState, Inner};
@@ -69,6 +70,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -90,6 +92,8 @@ pub fn run() {
                 show_main(app.handle());
             }
             monitor::spawn(app.handle().clone());
+            app.manage(updater::UpdateState::new(app.handle()));
+            updater::spawn(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -117,6 +121,9 @@ pub fn run() {
             commands::start_extra,
             commands::set_sound,
             commands::test_sound,
+            commands::get_update_status,
+            commands::check_update,
+            commands::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
