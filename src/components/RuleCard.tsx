@@ -15,7 +15,7 @@ interface Props {
 }
 
 export default function RuleCard({ status, resetAt, onEdit, onToggle, onDelete, onExtra }: Props) {
-  const { rule, usedSec, limitSec, running, locked, reached, extra } = status;
+  const { rule, usedSec, limitSec, running, locked, lockedEarly, reached, extra } = status;
   const inExtra = extra.activeLeft != null;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const remaining = Math.max(0, limitSec - usedSec);
@@ -64,7 +64,7 @@ export default function RuleCard({ status, resetAt, onEdit, onToggle, onDelete, 
               <strong>{fmtCountdown(extra.activeLeft ?? 0)}</strong>
               <small>extra time</small>
             </>
-          ) : locked ? (
+          ) : locked && reached ? (
             <>
               <IconLock size={22} />
               <small>until {resetAt}</small>
@@ -100,7 +100,11 @@ export default function RuleCard({ status, resetAt, onEdit, onToggle, onDelete, 
           </span>
         ))}
         {rule.weekendLimitMin != null && <span className="chip">Weekend {fmtMinutes(rule.weekendLimitMin)}</span>}
-        {rule.lockWhenReached && (
+        {rule.lockEarly ? (
+          <span className="chip strict" title="Can't be changed from the first warning until the next day">
+            <IconLock size={12} /> Super strict
+          </span>
+        ) : rule.lockWhenReached && (
           <span className="chip strict" title="Can't be changed once the limit is reached">
             <IconLock size={12} /> Strict
           </span>
@@ -112,7 +116,7 @@ export default function RuleCard({ status, resetAt, onEdit, onToggle, onDelete, 
       <footer className="rule-actions">
         {locked ? (
           <p className="locked-note">
-            <IconLock size={14} /> Locked — editing unlocks at {resetAt}
+            <IconLock size={14} /> {lockedEarly ? "Super strict — locked since the first warning, unlocks" : "Locked — editing unlocks"} at {resetAt}
           </p>
         ) : confirmDelete ? (
           <>
