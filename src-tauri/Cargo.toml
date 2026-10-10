@@ -1,6 +1,6 @@
 [package]
 name = "game-time-limiter"
-version = "1.1.0"
+version = "1.2.0"
 description = "Daily play-time limits for any game or app"
 edition = "2021"
 
