@@ -296,6 +296,14 @@ input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset
 }
 .strict-box .switch { margin-top: 2px; }
 .strict-box.on { border-color: rgba(255, 181, 71, 0.35); background: rgba(255, 181, 71, 0.06); }
+.lock-box { cursor: default; }
+.lock-box.super { border-color: rgba(255, 93, 108, 0.4); background: rgba(255, 93, 108, 0.06); }
+.lock-box.super strong svg { color: var(--danger); }
+.lock-levels { display: flex; gap: 4px; margin: 8px 0 6px; padding: 3px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); width: fit-content; }
+.lock-levels button { padding: 5px 12px; border-radius: 7px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.lock-levels button:hover { color: var(--text); }
+.lock-levels button.on { background: var(--surface-3); color: var(--text); }
+.lock-box.super .lock-levels button.on { background: rgba(255, 93, 108, 0.18); color: var(--danger); }
 .strict-box.extra-box.on { border-color: rgba(139, 123, 255, 0.4); background: var(--accent-soft); }
 .strict-box.extra-box.on strong svg { color: var(--accent); }
 .strict-box strong { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
