@@ -7,6 +7,12 @@ import AppAvatar from "./AppAvatar";
 import { IconCheck, IconClock, IconFile, IconFolder, IconLock, IconRefresh, IconSearch, IconX } from "../icons";
 
 const LIMIT_PRESETS = [30, 60, 90, 120, 180, 240];
+type LockLevel = "off" | "strict" | "super";
+const LOCK_LEVELS: { id: LockLevel; label: string }[] = [
+  { id: "off", label: "Off" },
+  { id: "strict", label: "Strict" },
+  { id: "super", label: "Super strict" },
+];
 const WARNING_OPTIONS = [30, 15, 10, 5, 2, 1];
 
 interface Props {
@@ -42,7 +48,9 @@ export default function RuleEditor({ initial, onClose, onSave }: Props) {
   const [limit, setLimit] = useState(initial?.dailyLimitMin ?? 60);
   const [weekend, setWeekend] = useState<number | null>(initial?.weekendLimitMin ?? null);
   const [warnings, setWarnings] = useState<number[]>(initial?.warningsMin ?? [10, 5, 1]);
-  const [strict, setStrict] = useState(initial?.lockWhenReached ?? true);
+  const [lock, setLock] = useState<LockLevel>(
+    initial?.lockEarly ? "super" : initial?.lockWhenReached === false ? "off" : "strict",
+  );
   const [allowExtra, setAllowExtra] = useState(initial?.allowExtra ?? true);
 
   const [procs, setProcs] = useState<ProcInfo[] | null>(null);
@@ -100,7 +108,8 @@ export default function RuleEditor({ initial, onClose, onSave }: Props) {
       dailyLimitMin: limit,
       weekendLimitMin: weekend,
       warningsMin: warnings.filter((w) => w < Math.max(limit, weekend ?? 0)),
-      lockWhenReached: strict,
+      lockWhenReached: lock !== "off",
+      lockEarly: lock === "super",
       enabled: initial?.enabled ?? true,
       allowExtra,
     });
@@ -234,17 +243,27 @@ export default function RuleEditor({ initial, onClose, onSave }: Props) {
               </div>
             </label>
 
-            <label className={`strict-box ${strict ? "on" : ""}`}>
-              <input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)} />
-              <span className="switch" />
+            <div className={`strict-box lock-box ${lock !== "off" ? "on" : ""} ${lock === "super" ? "super" : ""}`}>
               <div>
-                <strong><IconLock size={14} /> Strict mode</strong>
+                <strong><IconLock size={14} /> Lock this limit</strong>
+                <div className="lock-levels" role="radiogroup">
+                  {LOCK_LEVELS.map((l) => (
+                    <button key={l.id} role="radio" aria-checked={lock === l.id}
+                      className={lock === l.id ? "on" : ""} onClick={() => setLock(l.id)}>
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
                 <p>
-                  Once the limit is reached, this rule can't be edited, paused or removed until the next day. Turn it off
-                  if you want to be able to extend your time.
+                  {lock === "off" && "You can always edit, pause or extend this limit."}
+                  {lock === "strict" && "Once the limit is reached, it can't be edited, paused or removed until the next day."}
+                  {lock === "super" &&
+                    (warnings.length
+                      ? `Locks ${Math.max(...warnings)} minutes before the limit, when the first warning shows — no more adding time at the last minute. Stays locked until the next day.`
+                      : "Locks at the first warning. With no warnings set, it locks when the limit is reached.")}
                 </p>
               </div>
-            </label>
+            </div>
           </section>
         </div>
 
