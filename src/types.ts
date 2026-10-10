@@ -13,6 +13,8 @@ export interface Rule {
   weekendLimitMin: number | null;
   warningsMin: number[];
   lockWhenReached: boolean;
+  /** Super strict: locked from the first warning. */
+  lockEarly: boolean;
   enabled: boolean;
   allowExtra: boolean;
 }
@@ -35,6 +37,7 @@ export interface RuleStatus {
   processes: string[];
   reached: boolean;
   locked: boolean;
+  lockedEarly: boolean;
   extra: ExtraInfo;
 }
 
