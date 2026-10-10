@@ -59,6 +59,9 @@ pub struct Rule {
     /// Once the limit is reached the rule can't be edited, disabled or deleted until the next day.
     #[serde(default = "yes")]
     pub lock_when_reached: bool,
+    /// Super strict: lock from the first (biggest) warning instead of at the limit.
+    #[serde(default)]
+    pub lock_early: bool,
     #[serde(default = "yes")]
     pub enabled: bool,
     /// After the limit, allow short extra sessions (see EXTRA_STEPS_MIN).
@@ -67,6 +70,11 @@ pub struct Rule {
 }
 
 impl Rule {
+    /// Seconds before the limit at which a super strict rule locks (its biggest warning).
+    pub fn early_lock_sec(&self) -> f64 {
+        self.warnings_min.iter().copied().max().unwrap_or(0) as f64 * 60.0
+    }
+
     pub fn limit_sec(&self, weekday: Weekday) -> f64 {
         let weekend = matches!(weekday, Weekday::Sat | Weekday::Sun);
         let min = match (weekend, self.weekend_limit_min) {
@@ -211,6 +219,8 @@ pub struct RuleStatus {
     pub processes: Vec<String>,
     pub reached: bool,
     pub locked: bool,
+    /// Locked by super strict mode before the limit was reached.
+    pub locked_early: bool,
     pub extra: ExtraInfo,
 }
 
@@ -394,6 +404,7 @@ impl Inner {
             .unwrap_or(0.0);
         let limit = rule.limit_sec(day.weekday);
         let reached = rule.enabled && used >= limit;
+        let early = rule.enabled && rule.lock_early && !reached && used >= limit - rule.early_lock_sec();
         let processes = self.running.get(&rule.id).cloned().unwrap_or_default();
         let state = self
             .data
@@ -410,7 +421,8 @@ impl Inner {
             running: !processes.is_empty(),
             processes,
             reached,
-            locked: reached && rule.lock_when_reached,
+            locked: (reached && (rule.lock_when_reached || rule.lock_early)) || early,
+            locked_early: early,
         }
     }
 
@@ -470,6 +482,7 @@ mod tests {
             weekend_limit_min: None,
             warnings_min: vec![],
             lock_when_reached: true,
+            lock_early: false,
             enabled: true,
             allow_extra: true,
         });
@@ -540,11 +553,38 @@ mod tests {
     }
 
     #[test]
+    fn super_strict_locks_from_the_first_warning() {
+        let (mut inner, day, now) = setup();
+        inner.data.rules[0].lock_early = true;
+        inner.data.rules[0].warnings_min = vec![30, 10, 5];
+        let rule = inner.data.rules[0].clone();
+        let usage = |inner: &mut Inner, sec: f64| {
+            inner.data.usage.entry(day.key.clone()).or_default().insert("r1".into(), sec);
+        };
+
+        usage(&mut inner, 29.0 * 60.0); // 31 min left
+        assert!(!inner.status_of(&rule, &day, now).locked);
+        usage(&mut inner, 30.0 * 60.0); // 30 min left: first warning
+        let s = inner.status_of(&rule, &day, now);
+        assert!(s.locked && s.locked_early && !s.reached);
+        usage(&mut inner, 3600.0); // limit reached
+        let s = inner.status_of(&rule, &day, now);
+        assert!(s.locked && !s.locked_early && s.reached);
+
+        // Without warnings it behaves like strict mode.
+        inner.data.rules[0].warnings_min.clear();
+        let rule = inner.data.rules[0].clone();
+        usage(&mut inner, 59.0 * 60.0);
+        assert!(!inner.status_of(&rule, &day, now).locked);
+    }
+
+    #[test]
     fn old_data_files_still_load() {
         let json = r#"{"rules":[{"id":"a","name":"X","targets":[],"dailyLimitMin":30}],
             "settings":{"resetHour":4,"sound":true,"overlay":true,"notifications":true,"guardQuit":true},"usage":{},"lastSeen":0}"#;
         let data: Data = serde_json::from_str(json).unwrap();
         assert!(data.rules[0].allow_extra);
+        assert!(!data.rules[0].lock_early);
         assert!(data.settings.sound_file.is_none());
     }
 }
