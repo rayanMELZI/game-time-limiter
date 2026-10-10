@@ -211,10 +211,16 @@ pub fn spawn(app: AppHandle) {
                     due.sort_unstable();
                     if !due.is_empty() {
                         fired.1.extend(&due);
+                        let biggest = rule.warnings_min.iter().copied().max();
+                        let locks_now = rule.lock_early && due.iter().copied().max() == biggest;
                         alerts.push(Pending {
                             level: Level::Warning,
                             title: format!("{} — {} left", rule.name, fmt_remaining(remaining)),
-                            body: "Save your game now. It will be closed when the time runs out.".into(),
+                            body: if locks_now {
+                                "Super strict: this limit is now locked for today and can't be changed.".into()
+                            } else {
+                                "Save your game now. It will be closed when the time runs out.".into()
+                            },
                             action: None,
                         });
                     }
